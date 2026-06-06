@@ -1,0 +1,47 @@
+# ── 敏感配置（绝对不能提交）────────────────────────────────────
+config.py
+.flask_secret
+*.env
+.env.*
+
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── 数据文件（体积大，用 Git LFS 或不追踪）──────────────────────
+quant/data/historical/*.parquet
+quant/models/saved/*.pkl
+reports/*.csv
+
+# ── 运行时生成文件 ───────────────────────────────────────────────
+signals/candidates.json
+signals/history/
+logs/
+*.log
+*.jsonl
+
+# ── 用户数据（隐私）─────────────────────────────────────────────
+portfolios/*.json
+
+# ── 前端构建产物 ─────────────────────────────────────────────────
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+
+# ── 系统文件 ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user

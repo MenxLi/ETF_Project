@@ -1,0 +1,9 @@
+{
+  "prob_threshold": 0.5,
+  "blacklist": [
+    "159869",
+    "159766",
+    "159928"
+  ],
+  "threshold_overrides": {}
+}
