@@ -1,8 +1,8 @@
 """
 fetch_historical.py
 ────────────────────
-用 AKShare 拉取主流 ETF 历史日线数据，存为 Parquet 格式。
-AKShare 使用东方财富数据源，无需账号，覆盖全量 A 股 ETF。
+用 BaoStock 拉取主流 ETF 历史日线数据，存为 Parquet 格式。
+BaoStock 使用证券宝数据源，无需付费，覆盖全量 A 股 ETF。
 
 用法：
     python -m quant.data.fetch_historical                   # 拉全部，默认近 3 年
@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
-import akshare as ak
+import baostock as bs
 import pandas as pd
 
 from quant.utils.etf_list import ETF_CODES, CODE_TO_NAME
@@ -27,33 +27,41 @@ SAVE_DIR = Path(__file__).parent / "historical"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _bs_code(code: str) -> str:
+    """将纯数字代码转换为 BaoStock 格式（sh.510300 / sz.159915）。"""
+    if code.startswith(("5", "11")):
+        return f"sh.{code}"
+    else:
+        return f"sz.{code}"
+
+
 def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
     """拉取单只 ETF 日线数据。code 为纯数字格式如 '510300'。"""
-    start_date = start.replace("-", "")
-    end_date   = end.replace("-", "")
-
-    df = ak.fund_etf_hist_em(
-        symbol=code,
-        period="daily",
-        start_date=start_date,
-        end_date=end_date,
-        adjust="qfq",
+    bs_code = _bs_code(code)
+    rs = bs.query_history_k_data_plus(
+        bs_code,
+        "date,open,high,low,close,volume",
+        start_date=start,
+        end_date=end,
+        frequency="d",
+        adjustflag="2",  # 前复权
     )
 
-    if df is None or df.empty:
-        raise ValueError(f"{code} 无数据，AKShare 可能不覆盖此标的")
+    if rs.error_code != "0":
+        raise ValueError(f"{code} 查询失败：{rs.error_msg}")
 
-    df = df.rename(columns={
-        "日期": "date",
-        "开盘": "open",
-        "最高": "high",
-        "最低": "low",
-        "收盘": "close",
-        "成交量": "volume",
-    })
+    data_list = []
+    while rs.next():
+        data_list.append(rs.get_row_data())
 
-    keep = [c for c in ["date", "open", "high", "low", "close", "volume"] if c in df.columns]
-    df = df[keep].copy()
+    if not data_list:
+        raise ValueError(f"{code}（{bs_code}）无数据")
+
+    df = pd.DataFrame(data_list, columns=rs.fields)
+    df = df.rename(columns={"date": "date"})
+
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df["date"] = pd.to_datetime(df["date"])
     df["pct_chg"] = df["close"].pct_change() * 100
@@ -67,7 +75,12 @@ def fetch_all(codes: list, years: int = 3, skip_existing: bool = False):
     end   = datetime.today().strftime("%Y-%m-%d")
     start = (datetime.today() - timedelta(days=365 * years)).strftime("%Y-%m-%d")
 
-    print(f"数据源：AKShare（东方财富）  |  区间：{start} ~ {end}\n")
+    print(f"数据源：BaoStock（证券宝）  |  区间：{start} ~ {end}\n")
+
+    lg = bs.login()
+    if lg.error_code != "0":
+        print(f"BaoStock 登录失败：{lg.error_msg}")
+        return []
 
     success, failed = [], []
     for code in codes:
@@ -89,7 +102,9 @@ def fetch_all(codes: list, years: int = 3, skip_existing: bool = False):
             print(f"✗  {e}")
             failed.append((code, str(e)))
 
-        time.sleep(0.3)
+        time.sleep(0.1)
+
+    bs.logout()
 
     print(f"\n完成：成功 {len(success)} 只，失败 {len(failed)} 只")
     if failed:
