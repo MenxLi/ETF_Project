@@ -1,8 +1,8 @@
 """
 fetch_historical.py
 ────────────────────
-用 BaoStock 拉取主流 ETF 历史日线数据，存为 Parquet 格式。
-BaoStock 使用证券宝数据源，无需付费，覆盖全量 A 股 ETF。
+用 Tushare Pro 拉取主流 ETF 历史日线数据，存为 Parquet 格式。
+Tushare 使用聚合行情数据源，覆盖全量 A 股 ETF，前复权。
 
 用法：
     python -m quant.data.fetch_historical                   # 拉全部，默认近 3 年
@@ -18,83 +18,63 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
-import baostock as bs
+import tushare as ts
 import pandas as pd
 
 from quant.utils.etf_list import ETF_CODES, CODE_TO_NAME
+import config
 
 SAVE_DIR = Path(__file__).parent / "historical"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
+# 初始化 Tushare Pro
+ts.set_token(config.TUSHARE_TOKEN)
+pro = ts.pro_api()
 
-def _bs_code(code: str) -> str:
-    """将纯数字代码转换为 BaoStock 格式（sh.510300 / sz.159915）。"""
+
+def _ts_code(code: str) -> str:
+    """将纯数字代码转换为 Tushare 格式（510300.SH / 159915.SZ）。"""
     if code.startswith(("5", "11")):
-        return f"sh.{code}"
+        return f"{code}.SH"
     else:
-        return f"sz.{code}"
-
-
-def _fetch_segment(bs_code: str, start: str, end: str) -> list:
-    """拉取单段数据，返回原始行列表。"""
-    rs = bs.query_history_k_data_plus(
-        bs_code,
-        "date,open,high,low,close,volume",
-        start_date=start,
-        end_date=end,
-        frequency="d",
-        adjustflag="2",  # 前复权
-    )
-    if rs.error_code != "0":
-        raise ValueError(f"查询失败：{rs.error_msg}")
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
-    return rows, rs.fields
+        return f"{code}.SZ"
 
 
 def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
-    """拉取单只 ETF 日线数据，分年段拉取避免行数限制。"""
-    bs_code = _bs_code(code)
+    """拉取单只 ETF 日线数据（前复权）。"""
+    ts_code    = _ts_code(code)
+    start_date = start.replace("-", "")
+    end_date   = end.replace("-", "")
 
-    # 按月切分区间（每月约 22 个交易日，避免 BaoStock 100 条限制）
-    from calendar import monthrange
-    start_dt = datetime.strptime(start, "%Y-%m-%d")
-    end_dt   = datetime.strptime(end,   "%Y-%m-%d")
+    df = ts.pro_bar(
+        ts_code=ts_code,
+        asset="FD",         # FD=基金/ETF
+        adj="qfq",          # 前复权
+        start_date=start_date,
+        end_date=end_date,
+        freq="D",
+    )
 
-    segments = []
-    cur = start_dt.replace(day=1)
-    while cur <= end_dt:
-        seg_start = max(cur, start_dt)
-        last_day  = monthrange(cur.year, cur.month)[1]
-        seg_end   = min(datetime(cur.year, cur.month, last_day), end_dt)
-        segments.append((seg_start.strftime("%Y-%m-%d"), seg_end.strftime("%Y-%m-%d")))
-        # 下一个月
-        if cur.month == 12:
-            cur = datetime(cur.year + 1, 1, 1)
-        else:
-            cur = datetime(cur.year, cur.month + 1, 1)
+    if df is None or df.empty:
+        raise ValueError(f"{code}（{ts_code}）无数据")
 
-    all_rows, fields = [], None
-    for seg_start, seg_end in segments:
-        rows, f = _fetch_segment(bs_code, seg_start, seg_end)
-        all_rows.extend(rows)
-        if fields is None:
-            fields = f
+    df = df.rename(columns={
+        "trade_date": "date",
+        "open":       "open",
+        "high":       "high",
+        "low":        "low",
+        "close":      "close",
+        "vol":        "volume",
+    })
 
-    if not all_rows:
-        raise ValueError(f"{code}（{bs_code}）无数据")
+    keep = [c for c in ["date", "open", "high", "low", "close", "volume"] if c in df.columns]
+    df = df[keep].copy()
 
-    df = pd.DataFrame(all_rows, columns=fields)
-
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.drop_duplicates("date")
+    df["date"]   = pd.to_datetime(df["date"])
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
     df["pct_chg"] = df["close"].pct_change() * 100
-    df["code"] = code
-    df["name"] = CODE_TO_NAME.get(code, "")
+    df["code"]   = code
+    df["name"]   = CODE_TO_NAME.get(code, "")
     df = df.sort_values("date").reset_index(drop=True)
     return df
 
@@ -103,12 +83,7 @@ def fetch_all(codes: list, years: int = 3, skip_existing: bool = False):
     end   = datetime.today().strftime("%Y-%m-%d")
     start = (datetime.today() - timedelta(days=365 * years)).strftime("%Y-%m-%d")
 
-    print(f"数据源：BaoStock（证券宝）  |  区间：{start} ~ {end}\n")
-
-    lg = bs.login()
-    if lg.error_code != "0":
-        print(f"BaoStock 登录失败：{lg.error_msg}")
-        return []
+    print(f"数据源：Tushare Pro  |  区间：{start} ~ {end}\n")
 
     success, failed = [], []
     for code in codes:
@@ -130,9 +105,7 @@ def fetch_all(codes: list, years: int = 3, skip_existing: bool = False):
             print(f"✗  {e}")
             failed.append((code, str(e)))
 
-        time.sleep(0.1)
-
-    bs.logout()
+        time.sleep(0.3)   # Tushare 免费版限速
 
     print(f"\n完成：成功 {len(success)} 只，失败 {len(failed)} 只")
     if failed:

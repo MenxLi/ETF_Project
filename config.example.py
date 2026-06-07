@@ -11,3 +11,6 @@ WEB_PASSWORD  = "change_me"
 # ── 数据配置 ──────────────────────────────────────────────────
 DEFAULT_HISTORY_YEARS = 3
 REALTIME_INTERVAL_MIN = 5
+
+# ── Tushare 历史数据 ───────────────────────────────────────────
+TUSHARE_TOKEN = "your_tushare_token_here"
