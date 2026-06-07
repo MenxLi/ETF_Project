@@ -35,9 +35,8 @@ def _bs_code(code: str) -> str:
         return f"sz.{code}"
 
 
-def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
-    """拉取单只 ETF 日线数据。code 为纯数字格式如 '510300'。"""
-    bs_code = _bs_code(code)
+def _fetch_segment(bs_code: str, start: str, end: str) -> list:
+    """拉取单段数据，返回原始行列表。"""
     rs = bs.query_history_k_data_plus(
         bs_code,
         "date,open,high,low,close,volume",
@@ -46,24 +45,53 @@ def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
         frequency="d",
         adjustflag="2",  # 前复权
     )
-
     if rs.error_code != "0":
-        raise ValueError(f"{code} 查询失败：{rs.error_msg}")
-
-    data_list = []
+        raise ValueError(f"查询失败：{rs.error_msg}")
+    rows = []
     while rs.next():
-        data_list.append(rs.get_row_data())
+        rows.append(rs.get_row_data())
+    return rows, rs.fields
 
-    if not data_list:
+
+def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
+    """拉取单只 ETF 日线数据，分年段拉取避免行数限制。"""
+    bs_code = _bs_code(code)
+
+    # 按月切分区间（每月约 22 个交易日，避免 BaoStock 100 条限制）
+    from calendar import monthrange
+    start_dt = datetime.strptime(start, "%Y-%m-%d")
+    end_dt   = datetime.strptime(end,   "%Y-%m-%d")
+
+    segments = []
+    cur = start_dt.replace(day=1)
+    while cur <= end_dt:
+        seg_start = max(cur, start_dt)
+        last_day  = monthrange(cur.year, cur.month)[1]
+        seg_end   = min(datetime(cur.year, cur.month, last_day), end_dt)
+        segments.append((seg_start.strftime("%Y-%m-%d"), seg_end.strftime("%Y-%m-%d")))
+        # 下一个月
+        if cur.month == 12:
+            cur = datetime(cur.year + 1, 1, 1)
+        else:
+            cur = datetime(cur.year, cur.month + 1, 1)
+
+    all_rows, fields = [], None
+    for seg_start, seg_end in segments:
+        rows, f = _fetch_segment(bs_code, seg_start, seg_end)
+        all_rows.extend(rows)
+        if fields is None:
+            fields = f
+
+    if not all_rows:
         raise ValueError(f"{code}（{bs_code}）无数据")
 
-    df = pd.DataFrame(data_list, columns=rs.fields)
-    df = df.rename(columns={"date": "date"})
+    df = pd.DataFrame(all_rows, columns=fields)
 
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df["date"] = pd.to_datetime(df["date"])
+    df = df.drop_duplicates("date")
     df["pct_chg"] = df["close"].pct_change() * 100
     df["code"] = code
     df["name"] = CODE_TO_NAME.get(code, "")

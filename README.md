@@ -178,6 +178,114 @@ python web_app.py
 
 ---
 
+## 本地开发 / Local Development
+
+### 启动后端
+
+```powershell
+cd D:\AI_PROJECT
+.venv\Scripts\activate
+python web_app.py
+# 访问 http://localhost:5000
+```
+
+### 启动前端（开发模式，热更新）
+
+```powershell
+cd D:\AI_PROJECT\frontend
+npm run dev
+# 访问 http://localhost:5173
+```
+
+> 生产模式使用 `npm run build` 构建产物，由 Flask 直接托管，无需单独启动前端。
+
+### 通过 ngrok 暴露本地服务（外网访问）
+
+```powershell
+# 安装 ngrok：https://ngrok.com/download
+# 启动后端后，在新终端运行：
+ngrok http 5000
+# ngrok 会输出公网地址，如 https://xxxx.ngrok-free.app
+```
+
+---
+
+## 服务器部署 / Server Deployment
+
+### 连接服务器（SSH 配置）
+
+在本地 `~/.ssh/config` 中添加：
+
+```
+Host jump
+    HostName proxy.limengxun.com
+    Port 2222
+    User <your_username>
+
+Host etf
+    HostName <container_ip>
+    Port <container_ssh_port>
+    User root
+    ProxyJump jump
+```
+
+然后直接运行：
+
+```powershell
+ssh etf
+```
+
+### 服务器端启动后端
+
+```bash
+cd /workspace/<username>/etf
+# 使用 gunicorn 生产模式启动
+pip install gunicorn --break-system-packages
+gunicorn -w 2 -b 0.0.0.0:8000 web_app:app --daemon --log-file logs/gunicorn.log
+# 访问 http://<container_ip>:<mapped_port>
+```
+
+停止服务：
+
+```bash
+pkill gunicorn
+```
+
+### 服务器端构建前端
+
+前端构建产物由 Flask/Gunicorn 直接托管，在服务器上构建一次即可：
+
+```bash
+cd /workspace/<username>/etf/frontend
+npm install
+npm run build
+cd ..
+```
+
+### 服务器端配置 cron 定时任务
+
+```bash
+crontab -e
+```
+
+添加以下内容：
+
+```
+# 周一至五盘中确认
+25 9  * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday open
+25 11 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday amend
+5  13 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday pm
+50 14 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday close
+# 周一至五收盘信号
+35 15 * * 1-5 cd /workspace/<username>/etf && python run_daily.py
+# 周日重训 + 周一预报
+0  10 * * 0   cd /workspace/<username>/etf && python run_weekly.py
+# 每月第一个周日 Optuna 调优
+0  12 * * 0   cd /workspace/<username>/etf && python run_monthly.py
+```
+
+---
+
 ## 定时任务调度 / Scheduled Tasks
 
 | 任务 | 触发时间 | 脚本 | 说明 |
