@@ -17,12 +17,24 @@ import json
 import os
 import re
 import sys
+import threading
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, session, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
+
+# ── 信号生成任务状态（全局单例）────────────────────────────────
+_sig_job: dict = {
+    "status":      "idle",   # idle | running | done | error
+    "started_at":  None,
+    "finished_at": None,
+    "signal_count": 0,
+    "log":         [],       # 最近几条进度日志
+    "error":       None,
+}
+_sig_lock = threading.Lock()
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
@@ -274,6 +286,80 @@ def api_reset_password(user_id):
     u["password_hash"] = generate_password_hash(new_pw)
     write_users(users)
     return jsonify({"ok": True})
+
+
+# ── API: Realtime price ───────────────────────────────────────
+
+def _sina_code(code: str) -> str:
+    """将 ETF 代码转换为新浪财经格式，如 510300 → sh510300"""
+    return ("sh" if (code.startswith("5") and not code.startswith("159")) else "sz") + code
+
+
+@app.route("/api/realtime-price/<code>")
+@require_auth
+def api_realtime_price(code):
+    """
+    通过新浪财经接口获取单只 ETF 实时行情。
+    交易时段返回实时最新价；非交易时段返回本地最后收盘价。
+    """
+    import urllib.request
+    from datetime import time as dtime
+    from quant.utils.etf_list import CODE_TO_NAME
+
+    # 尝试拉取新浪实时行情
+    sina_code = _sina_code(code)
+    try:
+        url = f"https://hq.sinajs.cn/list={sina_code}"
+        req = urllib.request.Request(url, headers={
+            "Referer": "https://finance.sina.com.cn",
+            "User-Agent": "Mozilla/5.0",
+        })
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            text = resp.read().decode("gbk", errors="replace")
+
+        # 解析：var hq_str_sh510300="name,open,prev_close,current,high,low,...,date,time"
+        inner = text.split('"')[1] if '"' in text else ""
+        parts = inner.split(",")
+        if len(parts) >= 10 and parts[3]:
+            current    = float(parts[3])
+            open_p     = float(parts[1]) if parts[1] else current
+            prev_close = float(parts[2]) if parts[2] else current
+            pct_chg    = round((current - prev_close) / prev_close * 100, 2) if prev_close else 0
+            trade_time = parts[31] if len(parts) > 31 else ""
+            is_trading = bool(current and current != prev_close or trade_time >= "09:25")
+            return jsonify({
+                "code":       code,
+                "name":       CODE_TO_NAME.get(code, code),
+                "price":      round(current, 4),
+                "open":       round(open_p, 4),
+                "prev_close": round(prev_close, 4),
+                "pct_chg":    pct_chg,
+                "trade_time": trade_time,
+                "source":     "realtime",
+            })
+    except Exception:
+        pass  # 拉取失败，降级到本地收盘价
+
+    # 降级：返回本地最后收盘价
+    try:
+        from quant.data.fetch_historical import load
+        df = load(code)
+        if df is not None and not df.empty:
+            last = df.iloc[-1]
+            return jsonify({
+                "code":       code,
+                "name":       CODE_TO_NAME.get(code, code),
+                "price":      round(float(last["close"]), 4),
+                "open":       round(float(last.get("open", last["close"])), 4),
+                "prev_close": round(float(last["close"]), 4),
+                "pct_chg":    0.0,
+                "trade_time": str(last.get("date", ""))[:10],
+                "source":     "local_close",
+            })
+    except Exception:
+        pass
+
+    return jsonify({"error": "无法获取行情"}), 404
 
 
 # ── API: ETF list ─────────────────────────────────────────────
@@ -534,6 +620,62 @@ def api_signals():
     return jsonify(data)
 
 
+# ── API: Manual signal trigger ───────────────────────────────
+
+@app.route("/api/run-signals", methods=["POST"])
+@require_admin
+def api_run_signals():
+    """在后台线程启动信号生成，立即返回。"""
+    with _sig_lock:
+        if _sig_job["status"] == "running":
+            return jsonify({"error": "信号生成正在进行中，请稍候"}), 409
+        _sig_job.update({
+            "status":       "running",
+            "started_at":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "finished_at":  None,
+            "signal_count": 0,
+            "log":          ["[开始] 正在更新行情数据，请稍候…"],
+            "error":        None,
+        })
+
+    def _run():
+        import io, contextlib
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                from quant.signals.generator import generate_signals
+                signals = generate_signals()
+            output = buf.getvalue()
+            log_lines = [l for l in output.splitlines() if l.strip()][-10:]
+            with _sig_lock:
+                _sig_job.update({
+                    "status":       "done",
+                    "finished_at":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "signal_count": len(signals),
+                    "log":          log_lines or ["[完成] 信号生成成功"],
+                    "error":        None,
+                })
+        except Exception as e:
+            with _sig_lock:
+                _sig_job.update({
+                    "status":      "error",
+                    "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "log":         ["[错误] " + str(e)],
+                    "error":       str(e),
+                })
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/run-signals/status")
+@require_auth
+def api_run_signals_status():
+    """返回当前信号生成任务状态。"""
+    with _sig_lock:
+        return jsonify(dict(_sig_job))
+
+
 # ── API: Email log ────────────────────────────────────────────
 
 @app.route("/api/email-log")
@@ -719,6 +861,28 @@ def api_recalibrate():
         lookback = max(5, min(lookback, 120))
         result   = calibrate(lookback)
         return jsonify({"ok": True, "thresholds": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: Paper trades ────────────────────────────────────────
+
+@app.route("/api/paper-trades")
+@require_auth
+def api_paper_trades():
+    from quant.signals.paper_trader import load_paper_trades
+    return jsonify(load_paper_trades())
+
+
+@app.route("/api/paper-trades/refresh", methods=["POST"])
+@require_admin
+def api_paper_trades_refresh():
+    try:
+        from quant.signals.paper_trader import evaluate_all
+        days = int((request.json or {}).get("days", 0)) or None
+        evaluate_all(days)
+        from quant.signals.paper_trader import load_paper_trades
+        return jsonify(load_paper_trades())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

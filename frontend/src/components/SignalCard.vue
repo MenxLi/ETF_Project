@@ -104,6 +104,21 @@
         <span v-if="s.pos_weight">仓位占比 <span class="font-bold text-gray-700">{{ (s.pos_weight * 100).toFixed(1) }}%</span></span>
         <span v-if="s.sector" class="text-gray-400">板块：{{ s.sector }}</span>
       </div>
+
+      <!-- Quick trade actions -->
+      <div v-if="!historical" class="mt-3 flex items-center gap-2"
+           style="border-top:1px solid #f1f5f9;padding-top:12px">
+        <button class="flex-1 py-1.5 rounded-xl text-xs font-semibold text-white transition shadow-sm"
+                style="background:linear-gradient(135deg,#064e3b,#059669)"
+                @click.stop="$emit('trade', { ...s, action: 'buy' })">
+          📈 买入记录
+        </button>
+        <button class="flex-1 py-1.5 rounded-xl text-xs font-semibold transition shadow-sm"
+                style="background:#f0fdf4;color:#059669;border:1px solid #bbf7d0"
+                @click.stop="$emit('trade', { ...s, action: 'position' })">
+          📂 加入持仓
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -115,6 +130,7 @@ const props = defineProps({
   signal:     { type: Object, required: true },
   historical: { type: Boolean, default: false },
 })
+defineEmits(['trade'])
 const s = computed(() => props.signal)
 
 const ADV_LABEL = { OPEN: '建议开仓', ADD: '建议加仓', HOLD: '维持持有', REDUCE: '建议减仓', SKIP: '暂时跳过' }

@@ -47,4 +47,6 @@ desktop.ini
 *.user
 quant/signals/candidates.json
 quant/signals/thresholds.json
+quant/signals/model_config.json
+quant/signals/paper_trades.json
 quant/signals/history/

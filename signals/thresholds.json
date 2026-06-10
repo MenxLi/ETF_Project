@@ -1,15 +1,15 @@
 {
-  "calibrated_at": "2026-06-06 17:40:07",
+  "calibrated_at": "2026-06-08 08:19:48",
   "lookback_days": 20,
   "open_vol_ratio_min": 1.05,
   "open_pct_min": 0.0,
-  "amend_pct_min": 0.55,
-  "amend_pct_max": 5.47,
+  "amend_pct_min": 0.54,
+  "amend_pct_max": 5.36,
   "pm_pct_min": 0.0,
-  "pm_pct_max": 5.47,
-  "close_strong_pct": 0.91,
+  "pm_pct_max": 5.36,
+  "close_strong_pct": 0.89,
   "close_dd_threshold": 2.13,
-  "_market_vol_std": 1.824,
-  "_market_atr_mean": 2.658,
-  "_vol_ratio_p50": 0.891
+  "_market_vol_std": 1.785,
+  "_market_atr_mean": 2.66,
+  "_vol_ratio_p50": 0.895
 }

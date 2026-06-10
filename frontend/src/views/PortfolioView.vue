@@ -453,10 +453,25 @@
                     @click="showPosModal = false">✕</button>
           </div>
           <div class="space-y-3">
-            <div><label class="field-label">ETF 代码 *</label>
+            <div>
+              <label class="field-label">ETF 代码 *</label>
+              <!-- 快捷选择（仅新增时显示） -->
+              <div v-if="editCode === null && todaySignals.length" class="mb-2">
+                <span class="text-xs text-gray-400 mr-1.5">今日推荐：</span>
+                <button v-for="s in todaySignals" :key="s.code"
+                        class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full mr-1 mb-1 border transition"
+                        :style="posForm.code === s.code
+                          ? 'background:#059669;color:white;border-color:#059669'
+                          : 'background:#f0fdf4;color:#065f46;border-color:#bbf7d0'"
+                        @click="quickPickPos(s.code, s.name)">
+                  {{ s.name }}
+                  <span class="opacity-70">{{ (s.prob_up * 100).toFixed(0) }}%</span>
+                </button>
+              </div>
               <EtfSearch v-model="posForm.code" v-model:name="posForm.name"
                          :readonly="editCode !== null"
-                         placeholder="输入代码或名称搜索，例：沪深300" /></div>
+                         placeholder="输入代码或名称搜索，例：沪深300" />
+            </div>
             <div><label class="field-label">名称</label>
               <input v-model="posForm.name" type="text" readonly class="input bg-gray-50 text-gray-400" /></div>
             <div class="flex gap-3">
@@ -500,17 +515,56 @@
                         @click="txForm.action = opt.v">{{ opt.label }}</button>
               </div>
             </div>
-            <div><label class="field-label">ETF 标的 *</label>
+            <div>
+              <label class="field-label">ETF 标的 *</label>
+              <!-- 快捷选择 -->
+              <div v-if="pf?.positions?.length || todaySignals.length" class="mb-2">
+                <!-- 持仓中 -->
+                <div v-if="pf?.positions?.length" class="mb-1.5">
+                  <span class="text-xs text-gray-400 mr-1.5">持仓中：</span>
+                  <button v-for="p in pf.positions" :key="p.code"
+                          class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full mr-1 mb-1 border transition"
+                          :style="txForm.etf_code === p.code
+                            ? 'background:#1e3a8a;color:white;border-color:#1e3a8a'
+                            : 'background:#eff6ff;color:#1e3a8a;border-color:#bfdbfe'"
+                          @click="quickPickTx(p.code, p.name)">
+                    {{ p.name }}
+                  </button>
+                </div>
+                <!-- 今日推荐 -->
+                <div v-if="todaySignals.length">
+                  <span class="text-xs text-gray-400 mr-1.5">今日推荐：</span>
+                  <button v-for="s in todaySignals" :key="s.code"
+                          class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full mr-1 mb-1 border transition"
+                          :style="txForm.etf_code === s.code
+                            ? 'background:#059669;color:white;border-color:#059669'
+                            : 'background:#f0fdf4;color:#065f46;border-color:#bbf7d0'"
+                          @click="quickPickTx(s.code, s.name)">
+                    {{ s.name }}
+                    <span class="opacity-70">{{ (s.prob_up * 100).toFixed(0) }}%</span>
+                  </button>
+                </div>
+              </div>
               <EtfSearch v-model="txForm.etf_code" v-model:name="txForm.etf_name"
-                         placeholder="输入代码或名称搜索" /></div>
+                         placeholder="输入代码或名称搜索" />
+            </div>
             <div><label class="field-label">交易日期</label>
               <input v-model="txForm.date" type="date" class="input" /></div>
             <div class="flex gap-3">
               <div class="flex-1"><label class="field-label">数量（股）*</label>
                 <input v-model.number="txForm.shares" type="number" placeholder="例：1000" class="input" /></div>
-              <div class="flex-1"><label class="field-label">成交价（元）*</label>
+              <div class="flex-1">
+                <label class="field-label">
+                  成交价（元）*
+                  <span v-if="txPriceLoading" class="ml-1 text-blue-400 font-normal text-xs">拉取中…</span>
+                  <span v-else-if="txPriceSource === 'realtime'"
+                        class="ml-1 font-normal text-xs" style="color:#059669">● 实时价</span>
+                  <span v-else-if="txPriceSource === 'local_close'"
+                        class="ml-1 font-normal text-xs text-gray-400">昨收价</span>
+                </label>
                 <input v-model.number="txForm.price" type="number" step="0.001"
-                       placeholder="例：4.250" class="input" /></div>
+                       placeholder="例：4.250" class="input" />
+              </div>
             </div>
             <div class="flex justify-between items-center text-sm px-1 py-1 rounded-lg"
                  style="background:#f8fafc">
@@ -545,7 +599,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { store } from '../store.js'
 import EtfSearch from '../components/EtfSearch.vue'
-import { api, fmtCash, fmtPct, todayStr } from '../api.js'
+import { api, fmtCash, fmtPct, todayStr, fetchRealtimePrice } from '../api.js'
 
 // ── Avatar ────────────────────────────────────────────────────
 const AVATAR_COLORS = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981','#06b6d4','#f43f5e','#84cc16']
@@ -588,6 +642,8 @@ const txForm = reactive({
   date: todayStr(), action: 'buy',
   etf_code: '', etf_name: '', shares: '', price: '', note: '',
 })
+const txPriceLoading = ref(false)
+const txPriceSource  = ref('')   // 'realtime' | 'local_close' | ''
 
 // ── Computed ──────────────────────────────────────────────────
 const selUser = computed(() => store.users.find(u => u.id === selId.value))
@@ -619,12 +675,37 @@ watch(pf, p => {
   cfg.max_sector_pct   = p.max_sector_pct
 })
 
-// Auto-select own account for non-admins
+// ── Today's signals (for quick-pick) ─────────────────────────
+const todaySignals = ref([])
 onMounted(async () => {
   if (store.currentUser && !store.isAdmin) {
     await selectUser(store.currentUser.id)
   }
+  try {
+    const d = await api('GET', '/api/signals')
+    todaySignals.value = (d.signals ?? []).slice(0, 8)  // 最多显示8条
+  } catch {}
 })
+
+// 快捷填入 ETF（交易弹窗）并自动拉实时价
+async function quickPickTx(code, name) {
+  txForm.etf_code    = code
+  txForm.etf_name    = name || store.etfList[code] || code
+  txPriceSource.value = ''
+  txPriceLoading.value = true
+  const rt = await fetchRealtimePrice(code)
+  txPriceLoading.value = false
+  if (rt?.price) {
+    txForm.price        = rt.price
+    txPriceSource.value = rt.source
+  }
+}
+
+// 快捷填入 ETF（持仓弹窗）
+function quickPickPos(code, name) {
+  posForm.code = code
+  posForm.name = name || store.etfList[code] || code
+}
 
 // ── Data loading ──────────────────────────────────────────────
 async function selectUser(id) {

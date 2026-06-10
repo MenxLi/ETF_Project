@@ -22,3 +22,12 @@ export async function api(method, url, body) {
 export const fmtCash = v => '¥' + Math.round(v || 0).toLocaleString('zh-CN')
 export const fmtPct  = v => ((v || 0) * 100).toFixed(0) + '%'
 export const todayStr = () => new Date().toISOString().split('T')[0]
+
+/** 获取单只 ETF 实时/最新收盘价，返回 { price, pct_chg, source } 或 null */
+export async function fetchRealtimePrice(code) {
+  try {
+    return await api('GET', `/api/realtime-price/${code}`)
+  } catch {
+    return null
+  }
+}
