@@ -12,7 +12,6 @@ __pycache__/
 venv/
 env/
 *.egg-info/
-dist/
 build/
 
 # ── 数据文件（体积大，用 Git LFS 或不追踪）──────────────────────
