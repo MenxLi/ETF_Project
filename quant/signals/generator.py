@@ -100,7 +100,6 @@ def update_data(code: str) -> pd.DataFrame:
     keep = [c for c in ["date", "open", "high", "low", "close", "volume"] if c in new_df.columns]
     new_df = new_df[keep].copy()
     new_df["date"] = pd.to_datetime(new_df["date"])
-    new_df["pct_chg"] = new_df["close"].pct_change() * 100
     new_df["code"] = code
     new_df["name"] = CODE_TO_NAME.get(code, "")
 
@@ -109,7 +108,11 @@ def update_data(code: str) -> pd.DataFrame:
     else:
         combined = new_df
 
+    # 合并去重后再计算涨跌幅，避免单行 pct_change() 为 NaN
     combined = combined.drop_duplicates("date").sort_values("date").reset_index(drop=True)
+    combined["pct_chg"] = combined["close"].pct_change() * 100
+    combined["pct_chg"] = combined["pct_chg"].fillna(0.0)
+
     path = SAVE_DIR / f"{code}.parquet"
     combined.to_parquet(path, index=False)
     return combined

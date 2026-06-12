@@ -569,24 +569,66 @@ def api_create_transaction(user_id):
     user, err = _check_portfolio_access(user_id)
     if err:
         return err
-    data  = request.json or {}
+    data   = request.json or {}
+    action = data.get("action", "buy")   # "buy" | "sell"
+    code   = data.get("etf_code", "").strip()
+    name   = data.get("etf_name", code)
     shares = float(data.get("shares", 0))
     price  = float(data.get("price",  0))
+    amount = round(shares * price, 2)
+
+    # ── 1. 写入交易记录 ───────────────────────────────────────
     tx = {
         "id":         f"tx_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:20]}",
         "date":       data.get("date", datetime.now().strftime("%Y-%m-%d")),
-        "action":     data.get("action", "buy"),    # "buy" | "sell"
-        "etf_code":   data.get("etf_code", ""),
-        "etf_name":   data.get("etf_name", ""),
+        "action":     action,
+        "etf_code":   code,
+        "etf_name":   name,
         "shares":     shares,
         "price":      price,
-        "amount":     round(shares * price, 2),
+        "amount":     amount,
         "note":       data.get("note", ""),
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
     txs = read_transactions(user)
     txs.append(tx)
     write_transactions(user, txs)
+
+    # ── 2. 同步更新持仓和现金 ─────────────────────────────────
+    pf = read_portfolio(user)
+    pos = next((p for p in pf["positions"] if p["code"] == code), None)
+
+    if action == "buy":
+        pf["cash"] = round(pf.get("cash", 0) - amount, 2)
+        if pos:
+            # 加仓：用均价更新成本
+            old_shares = float(pos["shares"])
+            old_cost   = float(pos["cost_price"])
+            new_shares = old_shares + shares
+            new_cost   = round((old_shares * old_cost + amount) / new_shares, 4) if new_shares else old_cost
+            pos["shares"]     = new_shares
+            pos["cost_price"] = new_cost
+        else:
+            # 新开仓
+            pf["positions"].append({
+                "code":       code,
+                "name":       name,
+                "shares":     shares,
+                "cost_price": round(price, 4),
+                "buy_date":   data.get("date", datetime.now().strftime("%Y-%m-%d")),
+            })
+    elif action == "sell":
+        pf["cash"] = round(pf.get("cash", 0) + amount, 2)
+        if pos:
+            remaining = float(pos["shares"]) - shares
+            if remaining <= 0:
+                # 清仓：移除持仓
+                pf["positions"] = [p for p in pf["positions"] if p["code"] != code]
+            else:
+                pos["shares"] = remaining
+
+    write_portfolio(user, pf)
+
     return jsonify(tx), 201
 
 

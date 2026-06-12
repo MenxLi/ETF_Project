@@ -673,7 +673,11 @@ onMounted(async () => {
   }
 
   // Load today's signals
-  try { today.value = await api('GET', '/api/signals') }
+  try {
+    today.value = await api('GET', '/api/signals')
+    // 异步补全实时涨跌幅（不阻塞页面渲染）
+    _refreshPctChg(today.value?.signals ?? [])
+  }
   catch (e) { errToday.value = e.message }
   finally   { loadingToday.value = false }
 
@@ -686,6 +690,19 @@ onMounted(async () => {
   // Load paper trades (background)
   loadPaper()
 })
+
+// 逐只 ETF 拉取实时行情并更新 pct_chg / close
+async function _refreshPctChg(signals) {
+  for (const sig of signals) {
+    try {
+      const rt = await fetchRealtimePrice(sig.code)
+      if (rt?.price && rt.price > 0) {
+        sig.close   = rt.price
+        sig.pct_chg = rt.pct_chg ?? sig.pct_chg ?? 0
+      }
+    } catch {}
+  }
+}
 </script>
 
 <style scoped>

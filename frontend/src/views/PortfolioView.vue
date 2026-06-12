@@ -881,8 +881,12 @@ async function submitTx() {
       note:   txForm.note,
     })
     showTxModal.value = false
-    await loadTransactions()
-    store.status = '已记录 ✓'
+    // 刷新交易记录 + 持仓 + 现金
+    ;[pf.value, transactions.value] = await Promise.all([
+      api('GET', `/api/portfolio/${selId.value}`),
+      api('GET', `/api/transactions/${selId.value}`),
+    ])
+    store.status = txForm.action === 'buy' ? '买入已记录 ✓' : '卖出已记录 ✓'
   } catch (e) { store.status = '保存失败: ' + e.message }
 }
 
