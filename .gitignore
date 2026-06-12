@@ -20,8 +20,6 @@ quant/models/saved/*.pkl
 reports/*.csv
 
 # ── 运行时生成文件 ───────────────────────────────────────────────
-signals/candidates.json
-signals/history/
 logs/
 *.log
 *.jsonl
@@ -44,8 +42,10 @@ desktop.ini
 .idea/
 *.suo
 *.user
+# ── 信号运行时文件（环境独立，不同步）──────────────────────────
 quant/signals/candidates.json
 quant/signals/thresholds.json
-quant/signals/model_config.json
 quant/signals/paper_trades.json
 quant/signals/history/
+# model_config.json 含黑名单/阈值，入库以便多环境同步
+# quant/signals/model_config.json
