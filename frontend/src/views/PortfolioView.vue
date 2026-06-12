@@ -148,7 +148,7 @@
               </div>
               <button class="text-sm font-medium px-4 py-2 rounded-xl text-white transition shadow-sm"
                       style="background:linear-gradient(135deg,#1e3a8a,#3b82f6)"
-                      @click="openAddPos">+ 新增持仓</button>
+                      @click="openAddPos">📥 导入初始持仓</button>
             </div>
             <table class="w-full text-sm">
               <thead style="background:#f8fafc">
@@ -166,7 +166,7 @@
                   <td colspan="6" class="text-center py-14 text-gray-400">
                     <div class="text-4xl mb-3">📭</div>
                     <p class="font-medium">暂无持仓</p>
-                    <p class="text-xs mt-1">点击「新增持仓」添加</p>
+                    <p class="text-xs mt-1">点击「导入初始持仓」添加使用平台前的已有持仓</p>
                   </td>
                 </tr>
                 <tr v-for="p in pf.positions" :key="p.code"
@@ -452,6 +452,12 @@
             <button class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all text-lg font-light"
                     @click="showPosModal = false">✕</button>
           </div>
+          <!-- 导入说明（仅新增时显示） -->
+          <div v-if="editCode === null"
+               class="flex items-start gap-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-3">
+            <span class="mt-0.5">ℹ️</span>
+            <span>仅用于导入使用平台前的已有持仓，<strong>不扣减现金余额</strong>。日常交易请使用「新增交易」按钮。</span>
+          </div>
           <div class="space-y-3">
             <div>
               <label class="field-label">ETF 代码 *</label>
@@ -626,7 +632,7 @@ const showPosModal     = ref(false)
 const showTxModal      = ref(false)
 
 const editCode   = ref(null)
-const posTitle   = ref('新增持仓')
+const posTitle   = ref('导入初始持仓')
 const depositAmt = ref('')
 
 const cfg = reactive({
@@ -811,7 +817,7 @@ async function submitDeposit() {
 // ── Positions ─────────────────────────────────────────────────
 function openAddPos() {
   editCode.value = null
-  posTitle.value = '新增持仓'
+  posTitle.value = '导入初始持仓'
   Object.assign(posForm, { code: '', name: '', shares: '', cost_price: '', buy_date: todayStr() })
   showPosModal.value = true
 }
@@ -911,8 +917,11 @@ async function deleteTx(tx) {
   background: linear-gradient(135deg, #1e3a8a, #3b82f6);
 }
 .btn-cancel {
-  @apply flex-1 border border-gray-200 text-gray-600 rounded-xl py-2.5 text-sm
-         hover:bg-gray-50 cursor-pointer bg-white transition;
+  @apply flex-1 border border-gray-200 text-gray-600 
+  py-2.5 rounded-xl text-sm font-semibold transition cursor-pointer;
+}
+.btn-cancel:hover {
+  @apply bg-gray-50;
 }
 .field-label {
   @apply block text-xs font-medium text-gray-500 mb-1.5;

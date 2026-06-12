@@ -12,11 +12,11 @@
 
 **中文**
 
-ETF Quant 是一套面向个人投资者的量化交易辅助系统，利用 LightGBM 模型对 A 股主流 ETF 进行次日涨跌概率预测，自动生成买入候选信号，并通过邮件推送给多位用户。系统配备完整的 Web 管理界面，支持持仓管理、交易记录、历史信号回溯、盘中动态确认和模型参数调整。
+ETF Quant 是一套面向个人投资者的量化交易辅助系统，利用 XGBoost 模型对 A 股主流 ETF 进行次日涨跌概率预测，自动生成买入候选信号，并通过邮件推送给多位用户。系统配备完整的 Web 管理界面，支持多用户持仓管理、交易记录（与现金余额自动联动）、历史信号回溯、模拟盘胜率追踪和模型参数调整。
 
 **English**
 
-ETF Quant is a quantitative trading assistant for individual investors in the A-share market. It uses a LightGBM model to predict next-day up/down probabilities for major ETFs, automatically generates buy-candidate signals, and pushes daily reports via email to multiple users. A full-featured web dashboard supports portfolio management, trade logging, historical signal review, intraday confirmation, and model parameter tuning.
+ETF Quant is a quantitative trading assistant for individual investors in the A-share market. It uses an XGBoost model to predict next-day up/down probabilities for major ETFs, automatically generates buy-candidate signals, and pushes daily reports via email to multiple users. A full-featured web dashboard supports multi-user portfolio management, trade logging (with automatic cash sync), historical signal review, paper-trading win-rate tracking, and model parameter tuning.
 
 ---
 
@@ -24,13 +24,13 @@ ETF Quant is a quantitative trading assistant for individual investors in the A-
 
 | 功能 | 说明 |
 |------|------|
-| 📈 信号生成 | 每日收盘后，基于技术指标特征预测次日涨跌概率，筛选候选池 |
-| 🔔 邮件推送 | 自动发送个性化日报（持仓感知建议），支持多用户 |
-| ⏱ 盘中确认 | 开盘/午盘/下午/尾盘四节点动态过滤，减少假信号 |
-| 📊 持仓管理 | Web 界面管理资金、持仓、买卖记录，多账户独立 |
-| 🎯 模型调参 | 在线调整概率门槛、黑名单、盘中阈值，一键自动校准 |
+| 📈 信号生成 | 每日收盘后，基于技术指标特征预测次日涨跌概率，筛选候选池；管理员可手动触发 |
+| 🔔 邮件推送 | 自动发送个性化日报（含持仓感知建议 OPEN/ADD/HOLD/REDUCE），支持多用户 |
+| 📊 持仓管理 | 多账户独立持仓与现金；买卖交易后持仓和现金余额自动同步；支持导入初始持仓 |
+| 🎰 模拟盘追踪 | 以 T+1 开盘价入场，自动统计历史信号胜率、平均收益与持有天数分布 |
+| ⚡ 快速交易 | 信号卡片直接发起买入，自动填入 ETF 代码和实时价格 |
+| 🎯 模型调参 | 在线调整概率门槛、ETF 黑名单，无需重启服务 |
 | 📉 回测验证 | 历史回测模块，评估策略在不同周期的表现 |
-| 🗓 周日预报 | 每周日用周五数据提前生成周一信号并推送 |
 | 🔐 权限管理 | 管理员 / 普通用户两级权限，Session 认证 |
 
 ---
@@ -38,11 +38,10 @@ ETF Quant is a quantitative trading assistant for individual investors in the A-
 ## 技术栈 / Tech Stack
 
 **后端 Backend**
-- Python 3.10+
-- Flask（Web 服务 + REST API）
-- LightGBM（机器学习模型）
-- AKShare（行情数据源）
-- Optuna（超参数自动搜索）
+- Python 3.11+
+- Flask（Web 服务 + REST API）· gunicorn（生产部署）
+- XGBoost（机器学习模型）
+- Tushare Pro（历史行情数据源）· 新浪财经 hq_str（实时行情）
 - Pandas / NumPy / scikit-learn
 
 **前端 Frontend**
@@ -63,54 +62,38 @@ AI_PROJECT/
 ├── config.example.py          # 配置模板
 ├── web_app.py                 # Flask 主服务 + 所有 API
 ├── run_daily.py               # 每日 15:35 收盘任务（周一至五）
-├── run_weekly.py              # 每周日任务：重训 + 校准 + 生成周一信号
-├── run_monthly.py             # 每月第一个周日：Optuna 超参数搜索
+├── run_weekly.py              # 每周日任务：重训 + 生成周一信号
 ├── requirements.txt
-├── setup_scheduler.ps1        # 一键创建 Windows 定时任务脚本
+├── CHANGELOG.md
 │
 ├── quant/
 │   ├── data/
-│   │   ├── fetch_historical.py    # 历史行情拉取（AKShare）
-│   │   ├── realtime_monitor.py    # 盘中实时轮询
+│   │   ├── fetch_historical.py    # 历史行情拉取（Tushare Pro）
 │   │   └── historical/            # Parquet 格式历史数据（.gitignore）
 │   ├── features/
 │   │   └── engineer.py            # 技术指标特征工程
 │   ├── models/
-│   │   ├── trainer.py             # 模型训练（LightGBM）
-│   │   ├── tuner.py               # Optuna 超参数搜索
+│   │   ├── trainer.py             # 模型训练（XGBoost）
 │   │   └── saved/                 # 训练好的模型文件（.gitignore）
 │   ├── signals/
 │   │   ├── generator.py           # 信号候选池生成
-│   │   ├── calibrator.py          # 动态阈值自动校准
-│   │   ├── intraday.py            # 盘中四节点确认
 │   │   ├── notifier.py            # 邮件格式化与发送
-│   │   └── model_config.json      # 模型参数持久化
-│   ├── portfolio/
-│   │   └── manager.py             # 持仓管理 + 持仓感知建议
-│   └── backtest/
-│       └── runner.py              # 历史回测
+│   │   ├── model_config.json      # 模型参数持久化（概率门槛、黑名单）
+│   │   ├── candidates.json        # 当日候选池（.gitignore）
+│   │   └── history/               # 每日信号历史档案（.gitignore）
+│   └── utils/
+│       └── etf_list.py            # ETF 代码与名称映射表
 │
 ├── portfolios/                    # 用户持仓 JSON（.gitignore）
-├── signals/                       # 每日信号候选文件（.gitignore）
-├── reports/                       # 回测结果 CSV（.gitignore）
+├── static/dist/                   # 前端构建产物（Flask 托管）
 │
-└── frontend/                      # Vue 3 SPA
-    ├── src/
-    │   ├── views/                 # 各页面组件
-    │   │   ├── LoginView.vue
-    │   │   ├── SignalView.vue      # 今日信号 + 历史回溯
-    │   │   ├── EtfView.vue        # ETF 行情图表（MA/布林带/RSI 等）
-    │   │   ├── PortfolioView.vue  # 持仓管理
-    │   │   ├── BacktestView.vue   # 回测结果
-    │   │   ├── ModelView.vue      # 模型参数调整（管理员）
-    │   │   ├── EmailView.vue      # 邮件发送日志（管理员）
-    │   │   └── SystemView.vue     # 系统状态（管理员）
-    │   ├── components/            # 公共组件
-    │   ├── App.vue
-    │   ├── main.js
-    │   ├── store.js               # 全局状态
-    │   └── api.js                 # 统一 API 请求封装
-    └── dist/                      # 构建产物（.gitignore）
+└── frontend/                      # Vue 3 SPA 源码
+    └── src/views/
+        ├── LoginView.vue
+        ├── SignalView.vue          # 今日信号 + 历史回溯 + 模拟盘
+        ├── PortfolioView.vue       # 持仓管理 + 交易记录
+        ├── ModelView.vue           # 模型参数调整（管理员）
+        └── SystemView.vue          # 系统状态（管理员）
 ```
 
 ---
@@ -171,10 +154,7 @@ python web_app.py
 
 ### 8. 配置定时任务（Windows）
 
-```powershell
-# 以管理员身份运行 PowerShell
-.\setup_scheduler.ps1
-```
+在 Windows 任务计划程序中创建任务，每个交易日 15:35 后运行 `run_daily.py`，每周日运行 `run_weekly.py`。
 
 ---
 
@@ -271,17 +251,10 @@ crontab -e
 添加以下内容：
 
 ```
-# 周一至五盘中确认
-25 9  * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday open
-25 11 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday amend
-5  13 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday pm
-50 14 * * 1-5 cd /workspace/<username>/etf && python run_daily.py --intraday close
-# 周一至五收盘信号
+# 周一至五收盘信号生成
 35 15 * * 1-5 cd /workspace/<username>/etf && python run_daily.py
 # 周日重训 + 周一预报
 0  10 * * 0   cd /workspace/<username>/etf && python run_weekly.py
-# 每月第一个周日 Optuna 调优
-0  12 * * 0   cd /workspace/<username>/etf && python run_monthly.py
 ```
 
 ---
@@ -290,37 +263,31 @@ crontab -e
 
 | 任务 | 触发时间 | 脚本 | 说明 |
 |------|----------|------|------|
-| Quant_Open   | 周一至五 09:25 | `run_daily.py` (intraday) | 开盘竞价确认 |
-| Quant_Amend  | 周一至五 11:25 | `run_daily.py` (intraday) | 午盘前确认 |
-| Quant_PM     | 周一至五 13:05 | `run_daily.py` (intraday) | 下午开盘确认 |
-| Quant_Close  | 周一至五 14:50 | `run_daily.py` (intraday) | 尾盘确认 |
 | Quant_Daily  | 周一至五 15:35 | `run_daily.py` | 收盘信号生成 + 推送 |
 | Quant_Weekly | 周日 10:00     | `run_weekly.py` | 重训 + 周一信号预报 |
-| Quant_Monthly| 周日 12:00     | `run_monthly.py` | Optuna 月度调优 |
 
 ---
 
 ## 数据流 / Data Flow
 
 ```
-AKShare 行情数据
+Tushare Pro 行情数据
     │
     ▼
-历史 Parquet 文件
+历史 Parquet 文件（增量更新）
     │
     ▼
-特征工程（技术指标）─→ LightGBM 训练 ─→ 模型文件(.pkl)
-    │                                        │
-    ▼                                        ▼
-动态阈值校准 ←────────────────────── 信号候选池生成
-    │                                        │
-    ▼                                        ▼
-盘中四节点过滤                     持仓感知建议（per-user）
-    │                                        │
-    └──────────────── 邮件推送 ──────────────┘
-                           │
-                           ▼
-                     Web Dashboard
+特征工程（RSI/MACD/布林带/量比等）─→ XGBoost 训练 ─→ 模型文件(.pkl)
+                                                │
+                                                ▼
+                                        信号候选池生成（概率门槛过滤）
+                                                │
+                              ┌─────────────────┴──────────────────┐
+                              ▼                                      ▼
+                    持仓感知建议（per-user）               新浪实时行情补全涨跌幅
+                              │
+                              ▼
+                     邮件推送 + Web Dashboard
 ```
 
 ---
