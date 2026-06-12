@@ -4,6 +4,20 @@
 
 ---
 
+## v1.4 · 2026-06-12
+
+**Bug 修复**
+
+- 修复新增交易弹窗中手动搜索 ETF 时无法自动拉取实时价的问题：通过 `watch` 监听 `etf_code` 变化，覆盖快捷标签和手动搜索两种场景，选中即自动填入实时价
+
+**工程优化**
+
+- 新增 `.gitattributes`，强制 Vue/JS/Python 等源码文件行尾符为 LF，从根本上解决 Windows/Linux 混用导致 `npm run build` 报 Invalid end tag 的问题
+- 新增 `.editorconfig`，统一团队编辑器缩进与行尾符配置
+- `.gitignore` 补充忽略 `frontend/vite.config.js.timestamp-*` 临时文件
+
+---
+
 ## v1.3 · 2026-06-12
 
 **Bug 修复**

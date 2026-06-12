@@ -50,7 +50,11 @@ ETF Quant is a quantitative trading assistant for individual investors in the A-
 - Chart.js（K 线图、技术指标、成交量、RSI）
 
 **调度 Scheduler**
-- Windows 任务计划程序（Task Scheduler）
+- Windows 任务计划程序（Task Scheduler）/ Linux cron
+
+**工程规范**
+- `.gitattributes`：前端源码统一 LF 行尾符，避免跨平台构建异常
+- `.editorconfig`：编辑器缩进与行尾符统一配置
 
 ---
 
