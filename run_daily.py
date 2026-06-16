@@ -42,27 +42,35 @@ def main():
         sys.exit(0)
 
     from quant.signals.generator import generate_signals
+    from quant.signals.sell_generator import generate_sell_signals
     from quant.signals.notifier import push_daily_report
     from quant.signals.calibrator import calibrate
     from quant.portfolio.manager import load_users, advise_for_user
     from quant.models.trainer import FORWARD_DAYS
 
     # 1. 校准动态阈值
-    print("Step 1/4  校准动态阈值...")
+    print("Step 1/5  校准动态阈值...")
     calibrate()
 
-    # 2. 全局生成信号候选池（与用户无关）
-    print("Step 2/4  生成信号候选池...")
+    # 2. 全局生成做多信号候选池（与用户无关）
+    print("Step 2/5  生成做多信号候选池...")
     signals = generate_signals(forward=FORWARD_DAYS)
     price_map = {s["code"]: s["close"] for s in signals}
 
-    # 3. 加载用户列表
-    print("Step 3/4  加载用户列表...")
+    # 3. 生成卖出信号（扫描所有用户持仓）
+    print("Step 3/5  生成卖出信号...")
+    try:
+        generate_sell_signals()
+    except Exception as e:
+        print(f"  [警告] 卖出信号生成失败，跳过：{e}")
+
+    # 4. 加载用户列表
+    print("Step 4/5  加载用户列表...")
     users = load_users()
     print(f"  找到 {len(users)} 个活跃用户")
 
-    # 4. 逐用户推送
-    print("Step 4/4  生成建议并推送...\n")
+    # 5. 逐用户推送
+    print("Step 5/5  生成建议并推送...\n")
     for user in users:
         print(f"  ── 处理用户：{user.name} ──")
         advised, portfolio = advise_for_user(signals, user, price_map)

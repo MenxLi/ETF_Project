@@ -4,6 +4,24 @@
 
 ---
 
+## v1.5 · 待发布（卖出信号系统）
+
+**已完成**
+
+- [x] 止损止盈阈值（`stop_loss` / `take_profit`）从硬编码移入 `model_config.json`，模型调参页面新增止损（红）/ 止盈（绿）/ 模型看空门槛三个滑块控件
+- [x] 新增 `quant/signals/sell_generator.py`：收盘后扫描所有用户持仓 ETF，跑模型取 `prob_down`，叠加止损 / 止盈 / 模型看空三层规则，按优先级生成每用户卖出候选列表，保存至 `sell_candidates.json`
+- [x] `run_daily.py` 新增 Step 3/5 调用 `generate_sell_signals()`，与买入信号生成串联
+- [x] 新增后端 API：`GET /api/sell-signals`（返回当前用户卖出信号）、`POST /api/sell-signals/run`（管理员手动触发）
+
+- [x] 新增 `quant/signals/price_monitor.py`：批量拉新浪实时价（一次请求覆盖所有持仓 ETF）→ 检查止损止盈 → 写入 `alerts.json`，去重逻辑保证同一仓位同一触发类型当天只告警一次
+- [x] 新增 `run_intraday.py`：盘中监控入口，自动判断交易时段（09:30–11:30 / 13:00–15:00）后调用 price_monitor
+- [x] `setup_scheduler.ps1` 新增 `Quant_Monitor` 任务，工作日 09:30–14:30 每 30 分钟触发一次（共 9 个时间点）
+- [x] 新增后端 API：`GET /api/alerts`（返回当前用户告警）、`POST /api/alerts/<id>/dismiss`（标记已读）、`POST /api/alerts/dismiss-all`、`POST /api/alerts/run`（管理员手动触发）
+
+- [x] 信号看板新增"卖出信号"子 Tab：「收盘卖出建议」展示 sell_generator 生成的三类卖出信号（止损/止盈/模型看空），「盘中价格告警」展示 price_monitor 实时告警并支持逐条或全部标记已读；管理员可手动触发重新生成或盘中监控
+
+---
+
 ## v1.4 · 2026-06-12
 
 **Bug 修复**

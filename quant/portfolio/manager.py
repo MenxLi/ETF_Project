@@ -31,6 +31,19 @@ USERS_FILE     = PORTFOLIOS_DIR / "users.json"
 DEFAULT_TAKE_PROFIT = 0.08
 DEFAULT_STOP_LOSS   = 0.05
 
+
+def _load_thresholds() -> tuple[float, float]:
+    """从 model_config.json 读取止盈止损阈值，文件不存在或解析失败时返回默认值。"""
+    try:
+        cfg_file = ROOT / "quant" / "signals" / "model_config.json"
+        if cfg_file.exists():
+            cfg = json.loads(cfg_file.read_text("utf-8"))
+            return float(cfg.get("take_profit", DEFAULT_TAKE_PROFIT)), \
+                   float(cfg.get("stop_loss",   DEFAULT_STOP_LOSS))
+    except Exception:
+        pass
+    return DEFAULT_TAKE_PROFIT, DEFAULT_STOP_LOSS
+
 from quant.utils.etf_list import ETF_LIST
 CATEGORY_MAP = {e["code"]: e["category"] for e in ETF_LIST}
 
@@ -233,8 +246,14 @@ def _indicator_tags(signal: dict) -> list[str]:
 # ── 建议逻辑 ──────────────────────────────────────────────────
 
 def advise(signal: dict, portfolio: Portfolio,
-           take_profit: float = DEFAULT_TAKE_PROFIT,
-           stop_loss:   float = DEFAULT_STOP_LOSS) -> dict:
+           take_profit: float = None,
+           stop_loss:   float = None) -> dict:
+    if take_profit is None or stop_loss is None:
+        _tp, _sl = _load_thresholds()
+        if take_profit is None:
+            take_profit = _tp
+        if stop_loss is None:
+            stop_loss = _sl
     code     = signal["code"]
     category = CATEGORY_MAP.get(code, "其他")
     pos      = portfolio.get_position(code)

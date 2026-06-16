@@ -46,12 +46,17 @@ DIST_DIR          = ROOT / "static" / "dist"
 SK_FILE           = ROOT / ".flask_secret"
 MODEL_CONFIG_FILE = ROOT / "quant" / "signals" / "model_config.json"
 THRESHOLD_FILE    = ROOT / "quant" / "signals" / "thresholds.json"
-SIGNAL_HISTORY_DIR = ROOT / "quant" / "signals" / "history"
+SIGNAL_HISTORY_DIR   = ROOT / "quant" / "signals" / "history"
+SELL_CANDIDATES_FILE = ROOT / "quant" / "signals" / "sell_candidates.json"
+ALERTS_FILE          = ROOT / "quant" / "signals" / "alerts.json"
 
 _CONFIG_DEFAULTS = {
     "prob_threshold": 0.50,
     "blacklist":      ["159869", "159766", "159928"],
     "threshold_overrides": {},
+    "stop_loss":          0.05,   # 止损线：浮亏超过此比例触发卖出建议
+    "take_profit":        0.08,   # 止盈线：浮盈超过此比例触发卖出建议
+    "sell_prob_threshold": 0.55,  # 模型看空阈值：prob_down 超过此值触发卖出建议
 }
 
 def read_model_config() -> dict:
@@ -530,10 +535,22 @@ def api_upsert_position(user_id):
         "cost_price": float(data.get("cost_price", 0)),
         "buy_date":   data.get("buy_date", datetime.now().strftime("%Y-%m-%d")),
     }
+    amount = round(new_pos["shares"] * new_pos["cost_price"], 2)
     if pos:
+        # 加仓：追加份额，先用旧均价算出旧总成本，再合并
+        old_shares = float(pos["shares"])
+        old_cost   = float(pos["cost_price"])
+        new_shares = old_shares + new_pos["shares"]
+        new_cost   = round(
+            (old_shares * old_cost + amount) / new_shares, 4
+        ) if new_shares else old_cost
+        new_pos["shares"]     = new_shares
+        new_pos["cost_price"] = new_cost
         pos.update(new_pos)
     else:
         pf["positions"].append(new_pos)
+    # 从可用资金中扣除买入金额
+    pf["cash"] = round(pf.get("cash", 0) - amount, 2)
     write_portfolio(user, pf)
     return jsonify(new_pos)
 
@@ -660,6 +677,127 @@ def api_signals():
     data["signals"] = _personalize_signals(data.get("signals", []), me["id"])
     data["count"]   = len(data["signals"])
     return jsonify(data)
+
+
+# ── API: Sell signals ────────────────────────────────────────
+
+@app.route("/api/sell-signals")
+@require_auth
+def api_sell_signals():
+    """返回当前登录用户的卖出信号列表。"""
+    if not SELL_CANDIDATES_FILE.exists():
+        return jsonify({"trade_date": None, "generated_at": None, "signals": [], "count": 0})
+    data    = json.loads(SELL_CANDIDATES_FILE.read_text("utf-8"))
+    me      = get_current_user()
+    signals = data.get("users", {}).get(me["id"], [])
+    return jsonify({
+        "trade_date":   data.get("trade_date"),
+        "generated_at": data.get("generated_at"),
+        "signals":      signals,
+        "count":        len(signals),
+    })
+
+
+@app.route("/api/sell-signals/run", methods=["POST"])
+@require_admin
+def api_run_sell_signals():
+    """管理员手动触发卖出信号生成（后台线程）。"""
+    def _run():
+        try:
+            from quant.signals.sell_generator import generate_sell_signals
+            generate_sell_signals()
+        except Exception as e:
+            print(f"[卖出信号] 生成失败：{e}")
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+# ── API: Price alerts ────────────────────────────────────────
+
+def _read_alerts() -> list[dict]:
+    if not ALERTS_FILE.exists():
+        return []
+    try:
+        return json.loads(ALERTS_FILE.read_text("utf-8")).get("alerts", [])
+    except Exception:
+        return []
+
+
+def _write_alerts(alerts: list[dict]):
+    ALERTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ALERTS_FILE.write_text(
+        json.dumps({"alerts": alerts}, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+
+
+@app.route("/api/alerts")
+@require_auth
+def api_get_alerts():
+    """返回当前用户的未 dismiss 告警，按时间倒序。"""
+    me     = get_current_user()
+    alerts = _read_alerts()
+    # 管理员可看所有人；普通用户只看自己
+    if me.get("role") == "admin":
+        user_alerts = alerts
+    else:
+        user_alerts = [a for a in alerts if a.get("user_id") == me["id"]]
+    # 只返回未 dismiss 的，时间倒序
+    active = [a for a in user_alerts if not a.get("dismissed", False)]
+    active.sort(key=lambda a: a.get("timestamp", ""), reverse=True)
+    return jsonify({"alerts": active, "count": len(active)})
+
+
+@app.route("/api/alerts/<alert_id>/dismiss", methods=["POST"])
+@require_auth
+def api_dismiss_alert(alert_id):
+    """标记单条告警为已读（dismissed）。"""
+    me     = get_current_user()
+    alerts = _read_alerts()
+    found  = False
+    for a in alerts:
+        if a.get("id") == alert_id:
+            # 权限校验：只能 dismiss 自己的，管理员可 dismiss 所有
+            if me.get("role") != "admin" and a.get("user_id") != me["id"]:
+                return jsonify({"error": "无权限"}), 403
+            a["dismissed"] = True
+            found = True
+            break
+    if not found:
+        return jsonify({"error": "告警不存在"}), 404
+    _write_alerts(alerts)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/alerts/dismiss-all", methods=["POST"])
+@require_auth
+def api_dismiss_all_alerts():
+    """标记当前用户所有告警为已读。"""
+    me     = get_current_user()
+    alerts = _read_alerts()
+    for a in alerts:
+        if me.get("role") == "admin" or a.get("user_id") == me["id"]:
+            a["dismissed"] = True
+    _write_alerts(alerts)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/alerts/run", methods=["POST"])
+@require_admin
+def api_run_monitor():
+    """管理员手动触发一次盘中价格检查（后台线程）。"""
+    def _run():
+        try:
+            from quant.signals.price_monitor import run_monitor
+            run_monitor()
+        except Exception as e:
+            print(f"[价格监控] 手动触发失败：{e}")
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
 
 
 # ── API: Manual signal trigger ───────────────────────────────
@@ -798,7 +936,10 @@ def _personalize_signals(signals: list, user_id: str) -> list:
                 portfolio_file=user_obj["portfolio_file"],
                 active=user_obj.get("active", True),
             )
-            advised, _ = advise_for_user(signals, u_model)
+            # 用信号里的昨收价作为当前估值基准，使浮盈亏计算有效
+            price_map = {s["code"]: float(s["close"])
+                         for s in signals if s.get("close")}
+            advised, _ = advise_for_user(signals, u_model, price_map)
             return advised
     except Exception:
         pass
@@ -890,6 +1031,21 @@ def api_put_model_config():
         for k, v in data["threshold_overrides"].items():
             overrides[k] = float(v) if v is not None else None
         config["threshold_overrides"] = overrides
+    if "stop_loss" in data:
+        v = float(data["stop_loss"])
+        if not (0.01 <= v <= 0.50):
+            return jsonify({"error": "止损线需在 1% ~ 50% 之间"}), 400
+        config["stop_loss"] = round(v, 3)
+    if "take_profit" in data:
+        v = float(data["take_profit"])
+        if not (0.01 <= v <= 1.00):
+            return jsonify({"error": "止盈线需在 1% ~ 100% 之间"}), 400
+        config["take_profit"] = round(v, 3)
+    if "sell_prob_threshold" in data:
+        v = float(data["sell_prob_threshold"])
+        if not (0.40 <= v <= 0.95):
+            return jsonify({"error": "模型看空阈值需在 40% ~ 95% 之间"}), 400
+        config["sell_prob_threshold"] = round(v, 3)
     write_model_config(config)
     return jsonify(config)
 
@@ -903,6 +1059,7 @@ def api_recalibrate():
         lookback = max(5, min(lookback, 120))
         result   = calibrate(lookback)
         return jsonify({"ok": True, "thresholds": result})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

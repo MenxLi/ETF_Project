@@ -5,5 +5,8 @@
     "159766",
     "159928"
   ],
-  "threshold_overrides": {}
+  "threshold_overrides": {},
+  "stop_loss": 0.05,
+  "take_profit": 0.08,
+  "sell_prob_threshold": 0.55
 }

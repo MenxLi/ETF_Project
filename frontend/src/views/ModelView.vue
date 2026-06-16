@@ -69,6 +69,52 @@
 
           <hr class="divider" />
 
+          <!-- Stop loss -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <div class="param-label">止损线</div>
+                <div class="param-desc">持仓浮亏超过此比例时，生成卖出建议</div>
+              </div>
+              <div class="big-value" style="color:#dc2626">
+                {{ (cfg.stop_loss * 100).toFixed(0) }}<span class="big-value-unit">%</span>
+              </div>
+            </div>
+            <input type="range" v-model.number="cfg.stop_loss"
+                   min="0.01" max="0.20" step="0.01"
+                   class="range-input range-red w-full" />
+            <div class="flex justify-between text-xs mt-1 text-gray-400">
+              <span>1% 紧止损</span>
+              <span>默认 5%</span>
+              <span>20% 宽止损</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
+          <!-- Take profit -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div>
+                <div class="param-label">止盈线</div>
+                <div class="param-desc">持仓浮盈超过此比例时，生成卖出建议</div>
+              </div>
+              <div class="big-value" style="color:#059669">
+                {{ (cfg.take_profit * 100).toFixed(0) }}<span class="big-value-unit">%</span>
+              </div>
+            </div>
+            <input type="range" v-model.number="cfg.take_profit"
+                   min="0.03" max="0.50" step="0.01"
+                   class="range-input range-green w-full" />
+            <div class="flex justify-between text-xs mt-1 text-gray-400">
+              <span>3% 保守</span>
+              <span>默认 8%</span>
+              <span>50% 宽松</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
           <!-- Blacklist -->
           <div>
             <div class="param-label mb-0.5">ETF 黑名单</div>
@@ -213,6 +259,8 @@ const cfg = reactive({
   prob_threshold: 0.50,
   blacklist: [],
   threshold_overrides: {},
+  stop_loss:   0.05,
+  take_profit: 0.08,
 })
 const calibrated  = reactive({})
 const lookback    = ref(20)
@@ -308,6 +356,8 @@ async function saveAll() {
       prob_threshold: cfg.prob_threshold,
       blacklist: cfg.blacklist,
       threshold_overrides: cleanOverrides,
+      stop_loss:   cfg.stop_loss,
+      take_profit: cfg.take_profit,
     })
     okMsg.value = '设置已保存 ✓  下次信号生成时生效'
     setTimeout(() => { okMsg.value = '' }, 4000)
@@ -441,6 +491,8 @@ onMounted(load)
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(37,99,235,0.3);
 }
+.range-red::-webkit-slider-thumb  { background: #dc2626; box-shadow: 0 1px 4px rgba(220,38,38,0.3); }
+.range-green::-webkit-slider-thumb { background: #059669; box-shadow: 0 1px 4px rgba(5,150,105,0.3); }
 .band-active   { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .band-inactive { background: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0; }
 
@@ -501,7 +553,6 @@ onMounted(load)
 .btn-outline:hover:not(:disabled) { border-color: #94a3b8; color: #1e293b; }
 .btn-danger {
   padding: 8px 14px;
-  border-radius: 8px;
   background: #fef2f2;
   color: #dc2626;
   font-size: 13px;

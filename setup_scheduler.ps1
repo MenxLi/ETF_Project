@@ -15,6 +15,19 @@ function Register-WeekdayTask {
     Write-Host "  OK $Name  (Weekday $Time)" -ForegroundColor Green
 }
 
+function Register-WeekdayTaskMulti {
+    # 注册同一脚本在多个时间点触发（用于盘中轮询）
+    param($Name, $Argument, [string[]]$Times, [int]$TimeoutMin = 5)
+    Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
+    $triggers = $Times | ForEach-Object {
+        New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Weekdays -At $_
+    }
+    $action   = New-ScheduledTaskAction -Execute $Python -Argument $Argument -WorkingDirectory $WorkDir
+    $settings = New-ScheduledTaskSettingsSet -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Minutes $TimeoutMin) -StartWhenAvailable
+    Register-ScheduledTask -TaskName $Name -Trigger $triggers -Action $action -Settings $settings -RunLevel Highest -Force | Out-Null
+    Write-Host "  OK $Name  ($($Times -join ' / '))" -ForegroundColor Green
+}
+
 function Register-SundayTask {
     param($Name, $Argument, $Time, [int]$TimeoutMin = 30)
     Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
@@ -36,6 +49,12 @@ Register-WeekdayTask "Quant_PM"    "-m quant.signals.intraday --node pm"    "13:
 Register-WeekdayTask "Quant_Close" "-m quant.signals.intraday --node close" "14:50"
 Register-WeekdayTask "Quant_Daily" "run_daily.py"                           "15:35"
 
+# 盘中价格监控：每 30 分钟一次，覆盖上午 09:30-11:30 和下午 13:00-15:00
+Register-WeekdayTaskMulti "Quant_Monitor" "run_intraday.py" @(
+    "09:30","10:00","10:30","11:00","11:30",
+    "13:00","13:30","14:00","14:30"
+)
+
 Write-Host ""
 Write-Host "-- Sunday tasks --" -ForegroundColor Yellow
 Register-SundayTask "Quant_Weekly"  "run_weekly.py"  "10:00" 30
@@ -50,6 +69,7 @@ Write-Host "    11:25  Intraday morning close node"
 Write-Host "    13:05  Intraday afternoon open node"
 Write-Host "    14:50  Intraday close node"
 Write-Host "    15:35  Daily signal + report"
+Write-Host "    09:30~14:30 (x9)  Price monitor (stop-loss / take-profit alerts)"
 Write-Host ""
 Write-Host "  Sundays:"
 Write-Host "    10:00  Weekly model retrain"
