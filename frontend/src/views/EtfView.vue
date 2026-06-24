@@ -601,7 +601,7 @@ const categoryGroups = computed(() => {
     if (!map[cat]) map[cat] = []
     map[cat].push({ code, name })
   }
-  return CAT_ORDER.filter(c => map[c]).map(c => ({ name: c, items: map[c] }))
+  return [...CAT_ORDER, '其他'].filter(c => map[c]).map(c => ({ name: c, items: map[c] }))
 })
 
 const hasAnyGroup = computed(() =>
