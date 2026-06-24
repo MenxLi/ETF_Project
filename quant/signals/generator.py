@@ -20,16 +20,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-import tushare as ts
-import config
 
 from quant.data.fetch_historical import load as load_hist, SAVE_DIR
+from quant.data.tushare_client import pro_bar
 from quant.features.engineer import add_features, get_feature_cols
 from quant.models.trainer import load_model, FORWARD_DAYS
 from quant.utils.etf_list import ETF_CODES, CODE_TO_NAME
-
-ts.set_token(config.TUSHARE_TOKEN)
-_pro = ts.pro_api()
 
 
 def _ts_code(code: str) -> str:
@@ -88,7 +84,7 @@ def update_data(code: str) -> pd.DataFrame:
     if start > end:
         return existing  # 已是最新，无需更新
 
-    new_df = ts.pro_bar(
+    new_df = pro_bar(
         ts_code=_ts_code(code), asset="FD", adj="qfq",
         start_date=start.replace("-", ""), end_date=end.replace("-", ""), freq="D",
     )

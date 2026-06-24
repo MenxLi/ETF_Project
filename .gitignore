@@ -47,6 +47,8 @@ desktop.ini
 quant/signals/candidates.json
 quant/signals/thresholds.json
 quant/signals/paper_trades.json
+quant/signals/sell_candidates.json
+quant/signals/alerts.json
 quant/signals/history/
 # model_config.json 含黑名单/阈值，入库以便多环境同步
 # quant/signals/model_config.json

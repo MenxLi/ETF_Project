@@ -8,5 +8,8 @@
   "threshold_overrides": {},
   "stop_loss": 0.05,
   "take_profit": 0.08,
-  "sell_prob_threshold": 0.55
+  "sell_prob_threshold": 0.55,
+  "active_models": {
+    "5": "lgbm_forward5_20260624.pkl"
+  }
 }

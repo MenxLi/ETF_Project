@@ -20,7 +20,9 @@ trainer.py
 """
 
 import argparse
+import json
 import pickle
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -168,17 +170,54 @@ def train(forward: int = FORWARD_DAYS) -> lgb.LGBMClassifier:
     print("── Top 10 特征重要性 ──")
     print(fi.head(10).to_string())
 
-    # 保存模型
-    model_path = MODEL_DIR / f"lgbm_forward{forward}.pkl"
+    # 保存带日期的版本文件
+    date_str   = date.today().strftime("%Y%m%d")
+    model_name = f"lgbm_forward{forward}_{date_str}.pkl"
+    model_path = MODEL_DIR / model_name
+    bundle     = {"model": model, "feature_cols": feature_cols,
+                  "forward": forward, "threshold": THRESHOLD}
     with open(model_path, "wb") as f:
-        pickle.dump({"model": model, "feature_cols": feature_cols,
-                     "forward": forward, "threshold": THRESHOLD}, f)
+        pickle.dump(bundle, f)
     print(f"\n模型已保存：{model_path}")
+
+    # 将新版本设为激活版本
+    _set_active_model(forward, model_name)
+    print(f"已激活版本：{model_name}")
     return model
 
 
+_MODEL_CONFIG = MODEL_DIR.parent.parent / "signals" / "model_config.json"
+
+
+def _set_active_model(forward: int, filename: str) -> None:
+    """将 filename 写入 model_config.json 的 active_models[forward]。"""
+    try:
+        cfg = json.loads(_MODEL_CONFIG.read_text("utf-8")) if _MODEL_CONFIG.exists() else {}
+    except Exception:
+        cfg = {}
+    cfg.setdefault("active_models", {})[str(forward)] = filename
+    _MODEL_CONFIG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), "utf-8")
+
+
 def load_model(forward: int = FORWARD_DAYS) -> dict:
-    """加载已保存的模型，返回 dict（含 model 和 feature_cols）。"""
+    """
+    加载模型：优先使用 model_config.json 中 active_models 指定的版本，
+    不存在或出错时回退到旧式固定文件名 lgbm_forward{forward}.pkl。
+    """
+    # 优先：读 active_models 配置
+    try:
+        if _MODEL_CONFIG.exists():
+            cfg = json.loads(_MODEL_CONFIG.read_text("utf-8"))
+            active_file = cfg.get("active_models", {}).get(str(forward))
+            if active_file:
+                active_path = MODEL_DIR / active_file
+                if active_path.exists():
+                    with open(active_path, "rb") as f:
+                        return pickle.load(f)
+    except Exception:
+        pass
+
+    # 回退：旧式固定文件名（兼容存量环境）
     path = MODEL_DIR / f"lgbm_forward{forward}.pkl"
     if not path.exists():
         raise FileNotFoundError(f"模型不存在：{path}，请先运行 trainer.py")

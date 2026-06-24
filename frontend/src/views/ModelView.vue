@@ -247,12 +247,63 @@
         </div>
       </div>
 
+      <!-- SECTION 4: Model Version Management -->
+      <div class="card">
+        <div class="card-header">
+          <span class="section-num" style="background:#fef9c3;color:#a16207">04</span>
+          <div class="flex-1 min-w-0">
+            <div class="section-title">模型版本管理</div>
+            <div class="section-sub">每次训练后自动留存历史版本，支持一键回滚</div>
+          </div>
+          <button class="btn-outline" @click="loadVersions" :disabled="versionsLoading">
+            {{ versionsLoading ? '⏳' : '🔄 刷新' }}
+          </button>
+        </div>
+
+        <!-- Empty state -->
+        <div v-if="!versionsLoading && versions.length === 0"
+             class="card-body text-sm text-gray-400">
+          暂无版本记录（模型训练后将自动保存版本文件）
+        </div>
+
+        <!-- Version list -->
+        <div v-else class="divide-y divide-gray-100">
+          <div v-for="v in versions" :key="v.filename"
+               class="version-row" :class="v.is_active ? 'version-row-active' : ''">
+            <div class="flex-1 min-w-0">
+              <div class="version-name">
+                {{ v.filename }}
+                <span v-if="v.is_legacy" class="version-tag">旧格式</span>
+              </div>
+              <div class="version-meta">{{ v.size_kb }} KB · 保存于 {{ v.saved_at }}</div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <span v-if="v.is_active" class="badge-active">当前激活</span>
+              <button v-else
+                      class="btn-outline py-1 px-3 text-xs"
+                      :disabled="activating === v.filename"
+                      @click="activateVersion(v.filename)">
+                {{ activating === v.filename ? '⏳' : '激活' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rollback shortcut -->
+        <div v-if="prevVersion" class="card-body border-t border-gray-100">
+          <button class="rollback-btn" :disabled="activating !== null"
+                  @click="rollback">
+            ↩ 回滚到上一版本：{{ prevVersion.filename }}
+          </button>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '../api.js'
 
 const cfg = reactive({
@@ -269,6 +320,17 @@ const saving      = ref(false)
 const calibrating = ref(false)
 const errMsg      = ref('')
 const okMsg       = ref('')
+
+// ── 模型版本管理 ──────────────────────────────────────────────
+const versions        = ref([])
+const versionsLoading = ref(false)
+const activating      = ref(null)    // 正在激活的 filename
+
+const prevVersion = computed(() => {
+  const activeIdx = versions.value.findIndex(v => v.is_active)
+  if (activeIdx === 0 && versions.value.length > 1) return versions.value[1]
+  return null
+})
 
 const thresholdGroups = [
   {
@@ -382,7 +444,38 @@ async function recalibrate() {
   }
 }
 
-onMounted(load)
+async function loadVersions() {
+  versionsLoading.value = true
+  try {
+    const data = await api('GET', '/api/model-versions')
+    versions.value = data.versions || []
+  } catch (e) {
+    errMsg.value = '加载模型版本失败：' + e.message
+  } finally {
+    versionsLoading.value = false
+  }
+}
+
+async function activateVersion(filename) {
+  activating.value = filename
+  errMsg.value = ''; okMsg.value = ''
+  try {
+    await api('POST', '/api/model-versions/activate', { filename })
+    await loadVersions()
+    okMsg.value = `已激活：${filename}`
+    setTimeout(() => { okMsg.value = '' }, 4000)
+  } catch (e) {
+    errMsg.value = '激活失败：' + e.message
+  } finally {
+    activating.value = null
+  }
+}
+
+async function rollback() {
+  if (prevVersion.value) await activateVersion(prevVersion.value.filename)
+}
+
+onMounted(() => { load(); loadVersions() })
 </script>
 
 <style scoped>
@@ -611,6 +704,66 @@ onMounted(load)
 .param-auto { font-size: 11px; color: #64748b; margin-top: 4px; }
 .param-label { font-size: 13px; font-weight: 600; color: #1e293b; }
 .param-desc  { font-size: 12px; color: #64748b; margin-top: 1px; }
+
+/* ── Model version list ── */
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  transition: background 0.1s;
+}
+.version-row:hover { background: #f8fafc; }
+.version-row-active { background: #eff6ff; }
+.version-row-active:hover { background: #dbeafe; }
+.version-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  font-family: ui-monospace, monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.version-meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.version-tag {
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+.badge-active {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+.rollback-btn {
+  width: 100%;
+  padding: 9px 16px;
+  border-radius: 9px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.rollback-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+.rollback-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Toggle ── */
 .toggle {

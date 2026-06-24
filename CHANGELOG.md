@@ -4,7 +4,32 @@
 
 ---
 
-## v1.5 · 待发布（卖出信号系统）
+## v1.7 · 2026-06-24
+
+**持仓功能增强**
+
+- **B1 实时持仓估值**：持仓明细表新增现价 / 现值 / 浮盈 / 浮盈% 四列，绿涨红跌配色；顶部新增 5 张汇总卡片（总资产 / 现金 / 持仓市值 / 总浮盈 / 品种数量）
+- **B1a 卖出信号角标**：切换账户时并发拉取 `/api/sell-signals`，持仓表格 ETF 名旁显示「止损 / 止盈 / 看空」badge，一眼识别需关注的仓位
+- **B1b 快速加仓 / 减持**：操作列新增「+加仓」「-减持」按钮，点击后展开行内气泡表单（股数 + 价格 + 扣款/到账预览 + 现金变化），回车即可确认；底层调用 `POST /api/transactions` 实现交易与持仓联动
+
+**ETF 票池扩充（C1 / C2 / C3）**
+
+- **C1** `etf_list.py` 从 26 只扩充至 61 只，新增银行 / 保险 / AI / 机器人 / 家电 / 食品饮料 / 化工 / 石油 / 创新药 / 医疗器械 / 北证50 / 中证2000 等 35 只，新增「海外」分类（中概互联 / 纳指100 / 恒生科技 / 标普500）
+- **C2** ETF 分类体系细化为 11 类（宽基 / 海外 / 金融 / 医疗 / 科技 / 能源 / 消费 / 周期 / 地产 / 债券 / 商品）；`/api/etf-list` 新增 `categories` 字段，行情页侧栏支持折叠分组，信号页新增分类筛选条
+- **C3** 使用 `fetch_historical --skip-existing` 补拉新增 35 只历史数据，重训练后数据集从 18,876 → 39,719 行（×2.1），信号覆盖量从 26 → 61 只，激活模型更新为 `lgbm_forward5_20260624.pkl`
+
+**工程重构**
+
+- **E1 后端 Blueprint 拆分**：`web_app.py` 从 951 行精简至 94 行入口，API 按业务域拆分至 `routes/` 下 5 个 Blueprint（auth / portfolio / signals / admin / market）
+- **E2a SignalView 子组件拆分**：`SignalView.vue` 931 → 320 行，各 Tab 内容拆分为独立子组件（`TodaySignalTab` / `SellSignalTab` / `PaperTradeTab`），同步修正 Tab 顺序
+- **E2b PortfolioView 子组件拆分**：`PortfolioView.vue` 950 → 280 行，持仓表格 / 交易记录拆出为 `PositionTab` / `TransactionTab`
+- **E4a 日任务错误恢复**：`run_daily.py` 各阶段独立 try/except + 指数退避重试（3 次，5→10→20s），结构化日志写入 `logs/daily_YYYY-MM-DD.jsonl`
+- **E4b 模型版本管理**：`trainer.py` 保存带日期版本文件（`lgbm_forward5_YYYYMMDD.pkl`），`model_config.json` 新增 `active_models` 字段，新增 `/api/model-versions` 端点 + ModelView 一键激活 / 回滚
+- **E4c Tushare 调用封装**：新建 `quant/data/tushare_client.py` 单例（限速 0.5s/call + 超时 30s + 指数退避重试 3 次），`fetch_historical.py` 和 `generator.py` 统一改用封装接口
+
+---
+
+## v1.5 · 2026-06-23（卖出信号系统）
 
 **已完成**
 

@@ -2,10 +2,11 @@ import { reactive } from 'vue'
 import { api } from './api.js'
 
 export const store = reactive({
-  users:       [],
-  etfList:     {},
-  status:      '加载中…',
-  currentUser: null,   // { id, name, role, email }
+  users:          [],
+  etfList:        {},   // code → name
+  etfCategories:  {},   // code → category
+  status:         '加载中…',
+  currentUser:    null, // { id, name, role, email }
 
   get isAdmin() {
     return this.currentUser?.role === 'admin'
@@ -36,9 +37,10 @@ export const store = reactive({
         api('GET', '/api/users'),
         api('GET', '/api/etf-list'),
       ])
-      this.users   = u
-      this.etfList = e
-      this.status  = '就绪'
+      this.users         = u
+      this.etfList       = e.names      ?? e   // 兼容旧格式（纯 code→name 字典）
+      this.etfCategories = e.categories ?? {}
+      this.status        = '就绪'
     } catch (e) {
       this.status = '加载失败'
     }
@@ -64,10 +66,11 @@ export const store = reactive({
 
   async logout() {
     try { await api('POST', '/api/auth/logout') } catch {}
-    this.currentUser = null
-    this.users   = []
-    this.etfList = {}
-    this.status  = '未登录'
+    this.currentUser   = null
+    this.users         = []
+    this.etfList       = {}
+    this.etfCategories = {}
+    this.status        = '未登录'
   },
 
   async refreshUsers() {

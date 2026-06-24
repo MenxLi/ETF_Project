@@ -90,12 +90,10 @@
           </div>
         </template>
 
-        <!-- 其他 / 搜索结果 -->
-        <template v-if="groups.other.length">
+        <!-- 搜索结果（有搜索词时显示扁平列表） -->
+        <template v-if="query && groups.other.length">
           <div class="flex items-center gap-1.5 px-2 pt-3 pb-1">
-            <span class="text-xs font-semibold" style="color:#334155">
-              {{ query ? '搜索结果' : '其他' }}
-            </span>
+            <span class="text-xs font-semibold" style="color:#334155">搜索结果</span>
             <span class="text-xs ml-auto" style="color:#475569">{{ groups.other.length }}</span>
           </div>
           <div v-for="item in groups.other" :key="item.code"
@@ -109,8 +107,33 @@
           </div>
         </template>
 
-        <!-- Empty search -->
-        <div v-if="!hasAnyGroup && query"
+        <!-- 分类折叠分组（无搜索词时显示） -->
+        <template v-if="!query">
+          <template v-for="group in categoryGroups" :key="group.name">
+            <button class="w-full flex items-center gap-1 px-2 pt-3 pb-1 text-left"
+                    @click="toggleCat(group.name)">
+              <span class="text-xs font-semibold" style="color:#475569">{{ group.name }}</span>
+              <span class="text-xs ml-auto" style="color:#334155">{{ group.items.length }}</span>
+              <span class="text-xs ml-1" style="color:#475569">
+                {{ collapsedCats.has(group.name) ? '▶' : '▼' }}
+              </span>
+            </button>
+            <template v-if="!collapsedCats.has(group.name)">
+              <div v-for="item in group.items" :key="item.code"
+                   class="px-3 py-2 rounded-xl cursor-pointer transition-all mb-0.5"
+                   :style="selCode === item.code
+                     ? 'background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3)'
+                     : 'border:1px solid transparent'"
+                   @click="loadEtf(item.code)">
+                <div class="text-sm font-medium" style="color:#e2e8f0">{{ item.code }}</div>
+                <div class="text-xs truncate mt-0.5" style="color:#475569">{{ item.name }}</div>
+              </div>
+            </template>
+          </template>
+        </template>
+
+        <!-- 搜索无结果 -->
+        <div v-if="query && !hasAnyGroup"
              class="py-8 text-center text-xs" style="color:#475569">
           未找到「{{ query }}」
         </div>
@@ -546,20 +569,45 @@ const groups = computed(() => {
     .filter(code => store.etfList[code] && !ws.has(code) && !hs.has(code) && matches([code, store.etfList[code]]))
     .map(code => ({ code, name: store.etfList[code], tags: tags(code) }))
 
-  // Others
+  // 搜索时显示扁平搜索结果；非搜索时 other 为空，由 categoryGroups 接管
   const exclude = new Set([...ws, ...hs, ...ss])
-  const limit = q ? 50 : 30
-  const other = all
-    .filter(([code, name]) => !exclude.has(code) && matches([code, name]))
-    .slice(0, limit)
-    .map(([code, name]) => ({ code, name, tags: [] }))
+  const other = q
+    ? all
+        .filter(([code, name]) => !exclude.has(code) && matches([code, name]))
+        .slice(0, 50)
+        .map(([code, name]) => ({ code, name, tags: [] }))
+    : []
 
   return { watch, hold, signal, other }
 })
 
+// ── 分类分组（非搜索模式）───────────────────────────────────────
+const CAT_ORDER = ['宽基', '海外', '金融', '医疗', '科技', '能源', '消费', '周期', '地产', '债券', '商品']
+const collapsedCats = ref(new Set())
+
+function toggleCat(cat) {
+  const s = new Set(collapsedCats.value)
+  s.has(cat) ? s.delete(cat) : s.add(cat)
+  collapsedCats.value = s
+}
+
+const categoryGroups = computed(() => {
+  if (query.value) return []
+  const exclude = new Set([...watchSet.value, ...holdSet.value, ...signalSet.value])
+  const map = {}
+  for (const [code, name] of Object.entries(store.etfList || {})) {
+    if (exclude.has(code)) continue
+    const cat = store.etfCategories?.[code] ?? '其他'
+    if (!map[cat]) map[cat] = []
+    map[cat].push({ code, name })
+  }
+  return CAT_ORDER.filter(c => map[c]).map(c => ({ name: c, items: map[c] }))
+})
+
 const hasAnyGroup = computed(() =>
   groups.value.watch.length || groups.value.hold.length ||
-  groups.value.signal.length || groups.value.other.length
+  groups.value.signal.length || groups.value.other.length ||
+  categoryGroups.value.length
 )
 
 // ── ETF info ────────────────────────────────────────────────────

@@ -14,22 +14,16 @@ Tushare 使用聚合行情数据源，覆盖全量 A 股 ETF，前复权。
 """
 
 import argparse
-import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
-import tushare as ts
 import pandas as pd
 
+from quant.data.tushare_client import pro_bar
 from quant.utils.etf_list import ETF_CODES, CODE_TO_NAME
-import config
 
 SAVE_DIR = Path(__file__).parent / "historical"
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
-
-# 初始化 Tushare Pro
-ts.set_token(config.TUSHARE_TOKEN)
-pro = ts.pro_api()
 
 
 def _ts_code(code: str) -> str:
@@ -46,7 +40,7 @@ def fetch_one(code: str, start: str, end: str) -> pd.DataFrame:
     start_date = start.replace("-", "")
     end_date   = end.replace("-", "")
 
-    df = ts.pro_bar(
+    df = pro_bar(
         ts_code=ts_code,
         asset="FD",         # FD=基金/ETF
         adj="qfq",          # 前复权
@@ -104,8 +98,6 @@ def fetch_all(codes: list, years: int = 3, skip_existing: bool = False):
         except Exception as e:
             print(f"✗  {e}")
             failed.append((code, str(e)))
-
-        time.sleep(0.3)   # Tushare 免费版限速
 
     print(f"\n完成：成功 {len(success)} 只，失败 {len(failed)} 只")
     if failed:
