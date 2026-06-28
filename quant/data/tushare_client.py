@@ -22,11 +22,9 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from typing import Optional
-
-import pandas as pd
+from typing import TypeVar, ParamSpec, Callable
 import tushare as ts
-import config
+from functools import wraps
 
 log = logging.getLogger(__name__)
 
@@ -39,23 +37,15 @@ BASE_DELAY   = 2.0   # 首次重试等待（秒），指数退避序列：2 → 
 
 # ── 单例客户端 ─────────────────────────────────────────────────
 
-class _TushareClient:
+class RateLimiter:
     """Tushare Pro 单例封装，限速 + 超时 + 退避重试。"""
 
-    _instance: "_TushareClient | None" = None
-    _init_lock = threading.Lock()
+    _rate_lock: threading.Lock
+    _init_lock: threading.Lock
 
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._init_lock:
-                if cls._instance is None:
-                    obj = super().__new__(cls)
-                    ts.set_token(config.TUSHARE_TOKEN)
-                    obj._pro       = ts.pro_api()
-                    obj._last_call = 0.0
-                    obj._rate_lock = threading.Lock()
-                    cls._instance  = obj
-        return cls._instance
+    def __init__(self):
+        self._last_call = 0.0
+        self._rate_lock = threading.Lock()
 
     def _throttle(self) -> None:
         """等待至距上次调用满 MIN_INTERVAL 秒，然后更新时间戳。"""
@@ -65,47 +55,50 @@ class _TushareClient:
                 time.sleep(wait)
             self._last_call = time.monotonic()
 
-    def pro_bar(self, **kwargs) -> Optional[pd.DataFrame]:
-        """
-        调用 ts.pro_bar，含限速 + 超时 + 指数退避重试。
-        参数透传给 ts.pro_bar；超出重试次数后抛出最后一次异常。
-        """
-        code_hint = kwargs.get("ts_code", "?")
-        last_exc: Exception | None = None
+_limiter = RateLimiter()
+P = ParamSpec("P")
+R = TypeVar("R")
 
-        for attempt in range(MAX_RETRIES + 1):
-            self._throttle()
-            try:
-                with ThreadPoolExecutor(max_workers=1) as ex:
-                    result = ex.submit(ts.pro_bar, **kwargs).result(timeout=CALL_TIMEOUT)
-                return result
-            except FuturesTimeout:
-                last_exc = TimeoutError(
-                    f"Tushare pro_bar 超时（>{CALL_TIMEOUT}s）[{code_hint}]"
-                )
-            except Exception as exc:
-                last_exc = exc
+def rate_limited(limiter: RateLimiter):
+    """装饰器：对函数调用加上限速 + 超时 + 退避重试。"""
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
+        @wraps(func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            code_hint = kwargs.get("ts_code", "?")
+            last_exc: Exception | None = None
 
-            if attempt < MAX_RETRIES:
-                delay = BASE_DELAY * (2 ** attempt)
-                log.warning(
-                    "[tushare] %s 失败（%d/%d），%.0fs 后重试：%s",
-                    code_hint, attempt + 1, MAX_RETRIES + 1, delay, last_exc,
-                )
-                time.sleep(delay)
+            for attempt in range(MAX_RETRIES + 1):
+                limiter._throttle()
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as ex:
+                        result = ex.submit(func, *args, **kwargs).result(timeout=CALL_TIMEOUT)
+                    return result
+                except FuturesTimeout:
+                    last_exc = TimeoutError(
+                        f"[RateLimit] {func.__name__} 超时（>{CALL_TIMEOUT}s）[{code_hint}]"
+                    )
+                except Exception as exc:
+                    last_exc = exc
 
-        log.error(
-            "[tushare] %s 最终失败（已重试 %d 次）：%s",
-            code_hint, MAX_RETRIES, last_exc,
-        )
-        raise last_exc  # type: ignore[misc]
+                if attempt < MAX_RETRIES:
+                    delay = BASE_DELAY * (2 ** attempt)
+                    log.warning(
+                        "[RateLimit] %s 失败（%d/%d），%.0fs 后重试：%s",
+                        code_hint, attempt + 1, MAX_RETRIES + 1, delay, last_exc,
+                    )
+                    time.sleep(delay)
+
+            log.error(
+                "[RateLimit] %s 最终失败（已重试 %d 次）：%s",
+                code_hint, MAX_RETRIES, last_exc,
+            )
+            assert last_exc is not None
+            raise last_exc
+
+        return wrapper
+    return decorator
 
 
 # ── 模块级公共接口 ────────────────────────────────────────────
 
-_client = _TushareClient()
-
-
-def pro_bar(**kwargs) -> Optional[pd.DataFrame]:
-    """ts.pro_bar 的封装入口，限速 + 超时 + 重试。参数与原生接口完全相同。"""
-    return _client.pro_bar(**kwargs)
+pro_bar = rate_limited(_limiter)(ts.pro_bar)
